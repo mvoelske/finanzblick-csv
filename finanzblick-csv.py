@@ -32,13 +32,6 @@ def load_config():
 
 conf = load_config()
 
-def get_daterange():
-    from datetime import datetime as dt
-    to = dt.now()
-    fr = to - datetime.timedelta(days=90)
-    fmt = lambda t: re.sub("(?<=\.)0|^0", "", dt.strftime(t, '%e.%m.%Y'))
-    return fmt(fr), fmt(to)
-
 
 #%%
 from seleniumwire import webdriver
@@ -72,7 +65,8 @@ def login():
         except:
             # already accepted, hopefully
             pass
-
+    
+    #driver.fullscreen_window()
     element = WebDriverWait(driver, 10).until(
         EC.element_to_be_clickable((By.ID, 'form-login-submit'))
     )
@@ -93,11 +87,9 @@ def login():
         accept_cookies()
         click_login()
 
-    WebDriverWait(driver, 10).until(
+    WebDriverWait(driver, 60).until(
         EC.presence_of_element_located((By.CLASS_NAME, 'cardListItem__name'))
     )
-    driver.execute_script("document.body.style.zoom = '50%'")
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
 login()
 
 #%%
@@ -108,6 +100,12 @@ all_tokens = [dict(r.headers) for r in driver.requests]
 all_tokens = [h['Authorization'] for h in all_tokens if 'Authorization' in h]
 
 token = all_tokens[-1]
+headers = dict(loginRequest.headers)
+headers['Authorization'] = token
+headers['Accept'] = "application/json, text/plain, */*"
+headers['Referer'] = driver.current_url
+
+driver.close()
 
 def get_csv(account_id):
     from datetime import datetime as dt
@@ -116,17 +114,9 @@ def get_csv(account_id):
     fmt = lambda d: d.isoformat() + 'Z'
     url = f'https://finanzblickx.buhl.de/svc/api/v1/bookings/export/csv/{account_id}?StartDate={fmt(start_date)}&EndDate={fmt(end_date)}'
 
-    headers = dict(loginRequest.headers)
-
-    headers['Authorization'] = token
-    headers['Accept'] = "application/json, text/plain, */*"
-    headers['Referer'] = driver.current_url
 
     resp = rq.get(url, headers=headers)
     return resp.content
-
-
-all_csv = {a['name']: get_csv(a['id']) for a in tqdm(conf['fb_accounts'])}
 
 
 #%% adapted from my previous fb2ynab conversion script...
@@ -146,22 +136,53 @@ def to_ynab(item):
     date = date.split('.')
     date = '/'.join([date[1], date[0], date[2]])
     payee = item['Empfaenger']
-    memo = ' '.join([item['Verwendungszweck'], item['Buchungstext'], item['Notiz']])
+
+    memo = ' '.join([item[k] for k in ['Verwendungszweck', 'Buchungstext', 'Notiz'] if k in item])
     amt = float('.'.join(item['Betrag'].split(',')))
     inflow = 0 if amt <= 0 else amt
     outflow = 0 if amt >= 0 else -amt
     return dict(Date=date, Payee=payee, Memo=memo, Outflow='%.2f' % outflow, Inflow='%.2f' % inflow)
+
+
+all_csv = {a['name']: get_csv(a['id']) for a in tqdm(conf['fb_accounts'])}
+paypal_transactions = [to_ynab(i) for i in read_fbl(io.StringIO(all_csv[conf['paypal_account_name']].decode('utf8')))]
+del all_csv[conf['paypal_account_name']]
+paypal_pattern = re.compile(conf['paypal_reference_pattern'])
+paypal_by_amt: dict[float, list] = {}
+amt_as_key = lambda t: float(t['Inflow']) - float(t['Outflow'])
+for t in paypal_transactions:
+    k = amt_as_key(t)
+    if k not in paypal_by_amt: 
+        paypal_by_amt[k] = []
+    paypal_by_amt[k].append(t)
+
+def transform_item(d):
+    if paypal_pattern.findall(d['Memo']) and amt_as_key(d) in paypal_by_amt:
+        # fix for the new, even stupider paypal contactless transactions
+        candidates = paypal_by_amt[amt_as_key(d)]
+        parse = lambda d: datetime.datetime.strptime(d, '%m/%d/%Y')
+        ddate = parse(d['Date'])
+        ddiff = lambda c: abs((parse(c['Date']) - ddate).total_seconds())
+        best = min(candidates, key=ddiff)
+        d['Payee'] = best['Payee']
+        
+    if (d['Payee'].startswith("PayPal (Europe)") and ", " in d['Memo']):
+        ## if it's a paypal payment with the real payee in the memo, flip this around
+        m = d['Memo']
+        d['Memo'] = ", ".join([d['Payee']] + m.split(', ')[1:])
+        d['Payee'] = re.sub(r"^\. ", "", m.split(", ")[0])
+    return d
 
 def convert(f, out_fn):
   items = list(read_fbl(f))
   with open(out_fn, 'w') as f:
     w = csv.DictWriter(f, 'Date Payee Memo Outflow Inflow'.split())
     w.writeheader()
-    w.writerows(to_ynab(i) for i in items)
+    w.writerows(transform_item(to_ynab(i)) for i in items)
 
 for name, data in all_csv.items():
     f = io.StringIO(data.decode('utf8'))
     fn = pathlib.Path(conf['output_directory']).expanduser()
-    convert(f, fn / f"Buchungsliste-{name}.csv" )
+    convert(f, fn / f"{conf['filename_prefix']}{name}.csv" )
 
 # %%
