@@ -133,8 +133,9 @@ def read_fbl(f):
 
 def to_ynab(item):
     date = item['Buchungsdatum']
-    date = date.split('.')
-    date = '/'.join([date[1], date[0], date[2]])
+    if '.' in date:
+        date = date.split('.')
+        date = '/'.join([date[1], date[0], date[2]])
     payee = item['Empfaenger']
 
     memo = ' '.join([item[k] for k in ['Verwendungszweck', 'Buchungstext', 'Notiz'] if k in item])
