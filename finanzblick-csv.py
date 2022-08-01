@@ -71,15 +71,15 @@ def login():
         EC.element_to_be_clickable((By.ID, 'form-login-submit'))
     )
 
-    field_email = driver.find_element_by_id('eml-user-login')
-    field_password = driver.find_element_by_id('psw-user-login')
+    field_email = driver.find_element('id', 'eml-user-login')
+    field_password = driver.find_element('id', 'psw-user-login')
     field_email.clear()
     field_email.send_keys(conf['fb_username'])
     field_password.clear()
     field_password.send_keys(conf['fb_password'])
 
     def click_login():
-        driver.find_element_by_id('form-login-submit').click()
+        driver.find_element('id', 'form-login-submit').click()
     
     try:
         click_login()
