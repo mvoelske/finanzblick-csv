@@ -123,7 +123,10 @@ def get_csv(account_id):
 
 def read_fbl(f):
     r = csv.reader(f, delimiter=';')
-    header = next(r)
+    try:
+        header = next(r)
+    except:
+        return
     for line in r:
       d = dict(zip(header, line))
       if d['Buchungstext'] == 'SONSTIGER EINZUG' and d['Empfaenger'] == 'Unbekannt' and d['Verwendungszweck'].startswith('EC '):
