@@ -94,7 +94,7 @@ login()
 
 #%%
 
-loginRequest = [r for r in driver.requests if 'sessionToken' in r.url][0]
+loginRequest = [r for r in driver.requests if 'mein-buhlkonto' in r.url][0]
 
 all_tokens = [dict(r.headers) for r in driver.requests]
 all_tokens = [h['Authorization'] for h in all_tokens if 'Authorization' in h]
@@ -112,7 +112,7 @@ def get_csv(account_id):
     end_date = dt.now() + datetime.timedelta(days=1)
     start_date = end_date - datetime.timedelta(days=90)
     fmt = lambda d: d.isoformat() + 'Z'
-    url = f'https://finanzblickx.buhl.de/svc/api/v1/bookings/export/csv/{account_id}?StartDate={fmt(start_date)}&EndDate={fmt(end_date)}'
+    url = f'https://finanzblickx.buhl.de/svc/api/v1/io/Export/csv/{account_id}?StartDate={fmt(start_date)}&EndDate={fmt(end_date)}'
 
 
     resp = rq.get(url, headers=headers)
